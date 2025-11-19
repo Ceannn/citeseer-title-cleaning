@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import numpy as np
 import torch
@@ -12,50 +12,46 @@ from transformers import (
     BertForSequenceClassification,
     TrainingArguments,
     Trainer,
-    DataCollatorWithPadding,
 )
 
 from src.data_loader import load_train_test_data
 
 
 # ======================
-# 1. Dataset & 编码工具
+# 1. Dataset 定义：按需编码版（简单稳定）
 # ======================
 
 class TitleDataset(Dataset):
     """
-    用预先编码好的 encodings + labels 构造 HuggingFace Trainer 可用的 Dataset。
-    encodings: dict(input_ids / attention_mask / ...)
-    labels: List[int]
+    按需调用 tokenizer 的 Dataset：
+    - 保存原始文本和 label
+    - 在 __getitem__ 里调用 tokenizer
     """
-    def __init__(self, encodings: Dict[str, torch.Tensor], labels: List[int]):
-        assert len(labels) == encodings["input_ids"].shape[0]
-        self.encodings = encodings
-        self.labels = torch.tensor(labels, dtype=torch.long)
+    def __init__(self, texts: List[str], labels: List[int], tokenizer, max_length: int = 64):
+        self.texts = [str(t) for t in texts]
+        self.labels = list(labels)
+        self.tokenizer = tokenizer
+        self.max_length = max_length
 
     def __len__(self) -> int:
-        return self.labels.shape[0]
+        return len(self.labels)
 
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        item = {k: v[idx] for k, v in self.encodings.items()}
-        item["labels"] = self.labels[idx]
+    def __getitem__(self, idx: int):
+        text = self.texts[idx]
+        label = self.labels[idx]
+
+        enc = self.tokenizer(
+            text,
+            truncation=True,
+            padding="max_length",      # 固定长度，简单稳定
+            max_length=self.max_length,
+            return_tensors="pt",
+        )
+
+        # enc 里每个值形状是 (1, L)，去掉 batch 维度
+        item = {k: v.squeeze(0) for k, v in enc.items()}
+        item["labels"] = torch.tensor(label, dtype=torch.long)
         return item
-
-
-def encode_texts(tokenizer, texts: List[str], max_length: int = 64) -> Dict[str, torch.Tensor]:
-    """
-    一次性将一批文本编码成张量，避免在 Dataset.__getitem__ 中重复 tokenizer 调用。
-    动态 padding 交给 DataCollatorWithPadding 处理，因此这里 padding=False。
-    """
-    texts = [str(t) for t in texts]
-    encodings = tokenizer(
-        texts,
-        truncation=True,
-        padding=False,          # 动态 padding 由 collator 负责
-        max_length=max_length,
-        return_tensors="pt",    # (N, L) 的张量
-    )
-    return encodings
 
 
 # ======================
@@ -63,10 +59,6 @@ def encode_texts(tokenizer, texts: List[str], max_length: int = 64) -> Dict[str,
 # ======================
 
 def compute_metrics(eval_pred):
-    """
-    给 Trainer 用的 metrics 回调。
-    返回 accuracy / precision / recall / f1（binary, 以 1 为“正类”）。
-    """
     from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
     logits, labels = eval_pred
@@ -86,7 +78,7 @@ def compute_metrics(eval_pred):
 
 
 # ======================
-# 3. 主流程：加载数据、划分、微调 BERT、在 testSet 上评估
+# 3. 主流程：微调 + 测试集评估
 # ======================
 
 def train_and_evaluate_bert(
@@ -96,23 +88,17 @@ def train_and_evaluate_bert(
     train_sample_cap: Optional[int] = None,
 ):
     """
-    微调 BertForSequenceClassification 做二分类：
-    - 训练集：来自 positive/negative txt
-    - 验证集：从训练里切一部分
-    - 测试集：来自 testSet.xlsx（官方数据）
-
-    train_sample_cap:
-        若为 None，则使用全部训练数据；
-        若为正整数，则随机打乱后只取前 train_sample_cap 条作为训练（方便快速实验）。
+    微调 BERT 做标题二分类：
+    - 训练数据来自 positive/negative 文本
+    - 测试数据来自 testSet.xlsx
+    - 可选用 train_sample_cap 限制训练样本（方便快速实验）
     """
 
-    # ----------------------
     # 3.1 加载数据
-    # ----------------------
     X_train_all, y_train_all, X_test, y_test = load_train_test_data()
     print(f"[BERT] Total train samples: {len(X_train_all)}, test samples: {len(X_test)}")
 
-    # 可选：裁剪训练样本数量（无论 CPU/GPU 都可用，方便快速调参）
+    # 可选：限制训练样本（调参/开发模式）
     if train_sample_cap is not None and len(X_train_all) > train_sample_cap:
         from sklearn.utils import shuffle
         X_train_all, y_train_all = shuffle(X_train_all, y_train_all, random_state=42)
@@ -120,7 +106,7 @@ def train_and_evaluate_bert(
         y_train_all = y_train_all[:train_sample_cap]
         print(f"[BERT] Using subset of train data: {len(X_train_all)} samples")
 
-    # train / val 划分（stratify 保持类别比例）
+    # train / val 切分
     X_train, X_val, y_train, y_val = train_test_split(
         X_train_all,
         y_train_all,
@@ -131,9 +117,7 @@ def train_and_evaluate_bert(
 
     print(f"[BERT] Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
 
-    # ----------------------
     # 3.2 tokenizer & 模型
-    # ----------------------
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = BertForSequenceClassification.from_pretrained(
         model_name,
@@ -145,23 +129,12 @@ def train_and_evaluate_bert(
     print("[BERT] Using device:", device)
     print("[DEBUG] Model first param device:", next(model.parameters()).device)
 
-    # ----------------------
-    # 3.3 预先编码 & 构造 Dataset
-    # ----------------------
-    train_encodings = encode_texts(tokenizer, X_train, max_length=max_length)
-    val_encodings = encode_texts(tokenizer, X_val, max_length=max_length)
-    test_encodings = encode_texts(tokenizer, X_test, max_length=max_length)
+    # 3.3 构造 Dataset
+    train_dataset = TitleDataset(X_train, y_train, tokenizer, max_length=max_length)
+    val_dataset = TitleDataset(X_val, y_val, tokenizer, max_length=max_length)
+    test_dataset = TitleDataset(X_test, y_test, tokenizer, max_length=max_length)
 
-    train_dataset = TitleDataset(train_encodings, y_train)
-    val_dataset = TitleDataset(val_encodings, y_val)
-    test_dataset = TitleDataset(test_encodings, y_test)
-
-    # 动态 padding collator
-    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-
-    # ----------------------
     # 3.4 TrainingArguments
-    # ----------------------
     output_dir = os.path.join("experiments", "bert_finetune")
     os.makedirs(output_dir, exist_ok=True)
 
@@ -170,7 +143,7 @@ def train_and_evaluate_bert(
         num_train_epochs=num_epochs,
         per_device_train_batch_size=32,
         per_device_eval_batch_size=64,
-        eval_strategy="epoch",          # 你当前 transformers 版本支持这个写法
+        eval_strategy="epoch",          # 你的 transformers 版本支持 eval_strategy
         save_strategy="epoch",
         logging_steps=100,
         learning_rate=2e-5,
@@ -179,33 +152,26 @@ def train_and_evaluate_bert(
         metric_for_best_model="f1",
         greater_is_better=True,
         report_to=[],                   # 不用 wandb / tensorboard
-        fp16=True if device.type == "cuda" else False,  # GPU 上开启混合精度
-        warmup_ratio=0.1,               # 前 10% step warmup
-        lr_scheduler_type="linear",     # 线性学习率衰减
+        fp16=True if device.type == "cuda" else False,  # GPU 时开启混合精度
+        warmup_ratio=0.1,
+        lr_scheduler_type="linear",
     )
 
-    # ----------------------
     # 3.5 Trainer
-    # ----------------------
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         tokenizer=tokenizer,
-        data_collator=data_collator,
         compute_metrics=compute_metrics,
     )
 
-    # ----------------------
     # 3.6 训练
-    # ----------------------
     print("[BERT] Start training...")
     trainer.train()
 
-    # ----------------------
     # 3.7 在测试集上评估
-    # ----------------------
     print("[BERT] Evaluating on test set...")
     preds_output = trainer.predict(test_dataset)
     logits = preds_output.predictions
@@ -219,10 +185,11 @@ def train_and_evaluate_bert(
 
 
 if __name__ == "__main__":
-    # 默认 1 epoch，跑全量，如果想快速调试，可以给 train_sample_cap 传一个值，比如 40000
+    # 开发调试：可以先用子集，比如 40000
+    # 最终实验：把 train_sample_cap 改成 None 跑全量
     train_and_evaluate_bert(
         model_name="bert-base-uncased",
         max_length=64,
         num_epochs=1,
-        train_sample_cap=None,   # 调参/快跑：改成 40000 之类
+        train_sample_cap=40000,   # 先小样本验证没问题，再全量
     )
