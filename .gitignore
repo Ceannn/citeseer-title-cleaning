@@ -20,3 +20,13 @@ experiments/logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# ---- experiment heavy artifacts (do NOT commit) ----
+experiments/bert_finetune/checkpoint-*/
+experiments/models/*
+# （可选）如果你还有其他 checkpoint 命名
+**/checkpoint-*/
+
+# ---- allow plots to be tracked ----
+!experiments/plots/
+!experiments/plots/*.png
