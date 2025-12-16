@@ -21,6 +21,8 @@ tqdm>=4.66.0,<5.0.0
 transformers>=4.40.0,<5.0.0
 # Required for HuggingFace Trainer with PyTorch
 accelerate>=1.0.0,<2.0.0
+peft>=0.11.0,<0.12.0
+datasets>=2.18.0,<3.0.0
 
 # IMPORTANT:
 # PyTorch (torch) is NOT pinned here because it strongly depends on OS/CUDA.
@@ -28,3 +30,4 @@ accelerate>=1.0.0,<2.0.0
 #   https://pytorch.org/get-started/locally/
 # Example (CPU only):
 #   pip install torch --index-url https://download.pytorch.org/whl/cpu
+
