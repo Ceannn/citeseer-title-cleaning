@@ -8,11 +8,9 @@ import pandas as pd
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data", "raw")
 
-# === 根据你的实际 Excel 列名修改这里（重要） ===
-# 先猜一个，等会儿我们会打印列名给你看
 TEST_EXCEL_FILENAME = "testSet-1000.xlsx"
-TEST_TITLE_COL = "title given by manchine"   # TODO: 改成你 testSet 里“标题”的列名
-TEST_LABEL_COL = "Y/N"   # TODO: 改成你 testSet 里“标签”的列名
+TEST_TITLE_COL = "title given by manchine"   
+TEST_LABEL_COL = "Y/N"  
 
 
 def read_title_lines(path: str, encoding: str = "gb18030") -> List[str]:
