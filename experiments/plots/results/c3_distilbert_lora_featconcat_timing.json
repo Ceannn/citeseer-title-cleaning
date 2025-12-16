@@ -1,0 +1,7 @@
+{
+  "train_time_sec": 2316.6132087000005,
+  "inference_time_sec": 0.8482150999989244,
+  "titles_per_sec": 1178.9462366341604,
+  "total_params": 66660034,
+  "trainable_params": 297154
+}

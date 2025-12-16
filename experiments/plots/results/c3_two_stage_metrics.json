@@ -1,0 +1,14 @@
+{
+  "stage1_coverage": 0.037,
+  "stage1_accuracy": 0.8378378378378378,
+  "stage1_macro_f1": 0.45588235294117646,
+  "stage1_micro_f1": 0.8378378378378378,
+  "overall_accuracy": 0.878,
+  "overall_macro_precision": 0.8749193756449949,
+  "overall_macro_recall": 0.8790264736567553,
+  "overall_macro_f1": 0.8764501911983926,
+  "overall_micro_precision": 0.878,
+  "overall_micro_recall": 0.878,
+  "overall_micro_f1": 0.878,
+  "overall_aupr": 0.7890015661183328
+}
